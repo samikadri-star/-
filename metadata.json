@@ -1,0 +1,6 @@
+{
+  "name": "محول التقارير إلى إكسل",
+  "description": "تطبيق بسيط وجميل لتحويل تقارير الأنظمة القديمة بترميز ISO-8859-6 إلى ملفات Excel منسقة تلقائياً ومدرجة بالاتجاه العربي (RTL) من تطوير سامي القادري",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
