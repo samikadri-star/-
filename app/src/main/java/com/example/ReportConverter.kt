@@ -5,12 +5,18 @@ import org.apache.poi.ss.usermodel.HorizontalAlignment
 import org.apache.poi.ss.usermodel.IndexedColors
 import org.apache.poi.ss.usermodel.VerticalAlignment
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
+import org.apache.poi.xssf.usermodel.XSSFCellStyle
+import org.apache.poi.xssf.usermodel.XSSFFont
+import org.apache.poi.xssf.usermodel.XSSFColor
 import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object ReportConverter {
 
-    // Common Arabic report titles and their normalized ASCII-friendly or safe Arabic names for filenames.
+    // Common Arabic report titles and their normalized safe Arabic names for filenames.
     private val reportTypes = listOf(
         "ميزان مراجعة" to "ميزان_مراجعة",
         "ميزان المراجعة" to "ميزان_مراجعة",
@@ -43,6 +49,7 @@ object ReportConverter {
 
     /**
      * Extracts a descriptive report filename from the report's decoded content or falls back to original name.
+     * Incorporates a dynamic timestamp to ensure unique saves without repeating the filename.
      */
     fun extractReportTitle(content: String, originalFilename: String): String {
         val cleanFilename = originalFilename.substringBeforeLast(".")
@@ -120,16 +127,19 @@ object ReportConverter {
             parts.add(dateString)
         }
 
-        val finalName = parts.joinToString("_")
+        val baseName = parts.joinToString("_")
             .replace(Regex("[\\\\/:*?\"<>|]"), "") // Sanitize filesystem chars
             .trim()
         
-        return if (finalName.isEmpty()) "تقرير_مستخرج" else finalName
+        val finalName = if (baseName.isEmpty()) "تقرير_مستخرج" else baseName
+        
+        // Append a precise unique timestamp (Hours, Minutes, Seconds) to prevent filename conflicts on subsequent saves.
+        val timestampSuffix = SimpleDateFormat("HHmmss", Locale.ENGLISH).format(Date())
+        return "${finalName}_$timestampSuffix"
     }
 
     /**
-     * Simple parsing strategy: splits lines by two or more spaces.
-     * Prevents separating inside cell words (like "كشف حساب" where there is only 1 space).
+     * Parses strategy: Splits lines, preserving blank spacing and textual hierarchy perfectly.
      */
     fun parseWithSpaceSplitter(content: String): List<List<String>> {
         val result = mutableListOf<List<String>>()
@@ -137,19 +147,32 @@ object ReportConverter {
 
         for (line in lines) {
             val trimmed = line.trim()
-            if (trimmed.isEmpty()) continue
+            if (trimmed.isEmpty()) {
+                // Preserve blank rows to maintain report aesthetics
+                result.add(listOf(""))
+                continue
+            }
             
-            // Skip lines that are purely separator ornaments
-            if (trimmed.matches(Regex("^[-=*_+.\\s]+$"))) continue
+            // Keep division separators but label them for customized visual treatment
+            if (trimmed.matches(Regex("^[-=*_+.\\s]+$"))) {
+                result.add(listOf(trimmed))
+                continue
+            }
+
+            // Detect metadata statements or titles to keep them centered and avoid slicing words
+            val isSingleSentence = !line.contains("\t") && !trimmed.contains(Regex("\\s{2,}"))
+            if (isSingleSentence) {
+                result.add(listOf(trimmed))
+                continue
+            }
             
-            // Check for tabs first, otherwise split by 2+ spaces
             val cells = if (trimmed.contains("\t")) {
                 trimmed.split("\t").map { it.trim() }
             } else {
                 trimmed.split(Regex("\\s{2,}")).map { it.trim() }
             }
             
-            if (cells.isNotEmpty() && cells.any { it.isNotEmpty() }) {
+            if (cells.isNotEmpty()) {
                 result.add(cells)
             }
         }
@@ -157,24 +180,26 @@ object ReportConverter {
     }
 
     /**
-     * Advanced smart parsing strategy: Detects column boundaries dynamically by counting non-space text presence 
-     * across the entire file vertically. Ideal for fixed-width space-aligned tabular reports with empty cells.
+     * Advanced smart parsing strategy: Detects column boundaries dynamically by counting character presence.
+     * Preserves paragraph titles, informational text cards, and blank rows perfectly.
      */
     fun parseWithSmartValleyDetector(content: String): List<List<String>> {
         val rawLines = content.lines()
         
-        // Filter out decorative or separator lines to find real columns
+        // Find columns based on lines that actually have tabular dividers
         val activeLines = rawLines.map { it.trimEnd() }.filter { line ->
             val trimmed = line.trim()
-            trimmed.isNotEmpty() && !trimmed.matches(Regex("^[-=*_+.\\s]+$"))
+            trimmed.isNotEmpty() && !trimmed.matches(Regex("^[-=*_+.\\s]+$")) && (line.contains("\t") || trimmed.contains(Regex("\\s{2,}")))
         }
         
-        if (activeLines.isEmpty()) return emptyList()
+        if (activeLines.isEmpty()) {
+            return parseWithSpaceSplitter(content)
+        }
         
         val maxLen = activeLines.maxOf { it.length }
-        if (maxLen == 0) return emptyList()
+        if (maxLen == 0) return parseWithSpaceSplitter(content)
 
-        // Accumulate character occupancy counts vertically at each x-index
+        // Count character presence
         val presenceCounts = IntArray(maxLen)
         for (line in activeLines) {
             for (i in line.indices) {
@@ -184,12 +209,11 @@ object ReportConverter {
             }
         }
 
-        // Detect column start & end ranges. A vertical separator is where characters are 0 (or almost 0) across all lines
+        // Trace boundary ranges
         val boundaries = mutableListOf<IntRange>()
         var inContent = false
         var startIdx = 0
         
-        // A simple smoothing window of 1-character can help reduce noise
         for (i in 0 until maxLen) {
             val count = presenceCounts[i]
             val isSeparatorSpace = (count == 0)
@@ -210,12 +234,25 @@ object ReportConverter {
             boundaries.add(startIdx until maxLen)
         }
 
-        // Substring extract based on boundaries
+        // Process all lines while preserving empty space and simple titles
         val parsedRows = mutableListOf<List<String>>()
         for (line in rawLines) {
             val trimmed = line.trim()
-            if (trimmed.isEmpty()) continue
-            if (trimmed.matches(Regex("^[-=*_+.\\s]+$"))) continue
+            if (trimmed.isEmpty()) {
+                parsedRows.add(listOf("")) // Keep empty rows
+                continue
+            }
+            if (trimmed.matches(Regex("^[-=*_+.\\s]+$"))) {
+                parsedRows.add(listOf(trimmed)) // Keep dividers
+                continue
+            }
+
+            // Single line non-tabular sentences (Metadata titles, credits, info banners)
+            val isSingleSentence = !line.contains("\t") && !trimmed.contains(Regex("\\s{2,}"))
+            if (isSingleSentence) {
+                parsedRows.add(listOf(trimmed))
+                continue
+            }
 
             val rowCells = mutableListOf<String>()
             for (range in boundaries) {
@@ -229,105 +266,162 @@ object ReportConverter {
                     rowCells.add("")
                 }
             }
-            
-            // Add row only if it has some content
-            if (rowCells.any { it.isNotEmpty() }) {
-                parsedRows.add(rowCells)
-            }
+            parsedRows.add(rowCells)
         }
         
         return parsedRows
     }
 
     /**
-     * Generates a beautifully-designed, bold Excel workbook byte array with Right-to-Left sheets and automatic columns adjustment.
+     * Generates a beautifully-designed, bold Excel workbook byte array.
+     * Preserves the basic structure and layout of the report perfectly, styled matching "Editorial Aesthetic".
      */
     fun generateExcel(data: List<List<String>>): ByteArray {
         val workbook = XSSFWorkbook()
         val sheet = workbook.createSheet("تقرير_مستخرج")
 
-        // 1. CONFIGURE SHEET DIRECTION: Right to Left (RTL) for perfect Arabic alignment
         sheet.setRightToLeft(true)
 
-        // 2. DESIGN CORNERSTONE FONTS & STYLES (Zebra Corporate Palette: deep teal + light soft teal accents)
-        // Deep Teal header style
-        val headerFont = workbook.createFont().apply {
+        // DEFINING PALETTE COLORS (Editorial Aesthetic)
+        // Primary Purplebrand: XSSFColor with RGB #6750A4
+        val primaryPurple = XSSFColor(java.awt.Color(103, 80, 164), null)
+        // Deep Warm Violet for Text: RGB #21005D
+        val deepWarmViolet = XSSFColor(java.awt.Color(33, 0, 93), null)
+        // Alternating Soft Violet background: RGB #F3EDF7
+        val softVioletStrip = XSSFColor(java.awt.Color(243, 237, 247), null)
+        // Divider light gray: RGB #EADDFF
+        val lightDividerColor = XSSFColor(java.awt.Color(234, 221, 255), null)
+
+        // Fonts
+        val headerFont = (workbook.createFont() as XSSFFont).apply {
             bold = true
             fontHeightInPoints = 11
-            color = IndexedColors.WHITE.getIndex()
+            setColor(XSSFColor(java.awt.Color.WHITE, null))
         }
-        val headerStyle = workbook.createCellStyle().apply {
+
+        val dataBoldFont = (workbook.createFont() as XSSFFont).apply {
+            bold = true
+            fontHeightInPoints = 10
+            setColor(deepWarmViolet)
+        }
+
+        val titleFont = (workbook.createFont() as XSSFFont).apply {
+            bold = true
+            fontHeightInPoints = 12
+            setColor(primaryPurple)
+        }
+
+        val faintFont = (workbook.createFont() as XSSFFont).apply {
+            bold = false
+            fontHeightInPoints = 9
+            setColor(XSSFColor(java.awt.Color(100, 100, 110), null))
+        }
+
+        // Styles
+        val headerStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
             setFont(headerFont)
-            fillForegroundColor = IndexedColors.TEAL.getIndex()
+            setFillForegroundColor(primaryPurple)
             fillPattern = FillPatternType.SOLID_FOREGROUND
             alignment = HorizontalAlignment.CENTER
             verticalAlignment = VerticalAlignment.CENTER
         }
 
-        // Bold Font for normal text as requested: ("الخط عريض")
-        val boldDataFont = workbook.createFont().apply {
-            bold = true
-            fontHeightInPoints = 10
-        }
-
-        // Normal content style
-        val dataStyle = workbook.createCellStyle().apply {
-            setFont(boldDataFont)
+        val dataStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
+            setFont(dataBoldFont)
             alignment = HorizontalAlignment.GENERAL
             verticalAlignment = VerticalAlignment.CENTER
         }
 
-        // Zebra striped alternate style (soft teal background)
-        val alternateStyle = workbook.createCellStyle().apply {
-            setFont(boldDataFont)
-            fillForegroundColor = IndexedColors.LIGHT_TURQUOISE.getIndex() // Beautiful matching soft accent
+        val alternateStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
+            setFont(dataBoldFont)
+            setFillForegroundColor(softVioletStrip)
             fillPattern = FillPatternType.SOLID_FOREGROUND
             alignment = HorizontalAlignment.GENERAL
             verticalAlignment = VerticalAlignment.CENTER
         }
 
+        val metadataStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
+            setFont(titleFont)
+            alignment = HorizontalAlignment.RIGHT
+            verticalAlignment = VerticalAlignment.CENTER
+        }
+
+        val dividerStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
+            setFont(faintFont)
+            setFillForegroundColor(lightDividerColor)
+            fillPattern = FillPatternType.SOLID_FOREGROUND
+            alignment = HorizontalAlignment.CENTER
+            verticalAlignment = VerticalAlignment.CENTER
+        }
+
         var maxCols = 0
+        var tableDataRowIndex = 0
 
         for ((rIdx, rowData) in data.withIndex()) {
             val row = sheet.createRow(rIdx)
-            row.heightInPoints = 25f // Comfortable height padding
 
             if (rowData.size > maxCols) {
                 maxCols = rowData.size
             }
 
-            // Standardize first line as header
+            // Recognize empty / separator / metadata rows
+            val isBlank = rowData.isEmpty() || (rowData.size == 1 && rowData[0].isEmpty())
+            val isDivider = rowData.size == 1 && rowData[0].trim().matches(Regex("^[-=*_+.\\s]+$"))
+            val isMetadata = rowData.size == 1 && !isDivider && !isBlank
             val isHeader = (rIdx == 0)
 
+            if (isBlank) {
+                row.heightInPoints = 14f // Faint empty spacing height
+                continue
+            } else if (isDivider) {
+                row.heightInPoints = 8f  // Custom neat height for decorative lines
+                val cell = row.createCell(0)
+                cell.setCellValue("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                cell.cellStyle = dividerStyle
+                continue
+            }
+
+            row.heightInPoints = 26f // Comfortable padded rows
+
+            // Standardize cells
             for ((cIdx, value) in rowData.withIndex()) {
                 val cell = row.createCell(cIdx)
                 cell.setCellValue(value)
 
-                if (isHeader) {
-                    cell.cellStyle = headerStyle
-                } else {
-                    cell.cellStyle = if (rIdx % 2 == 1) alternateStyle else dataStyle
+                when {
+                    isHeader -> {
+                        cell.cellStyle = headerStyle
+                    }
+                    isMetadata -> {
+                        cell.cellStyle = metadataStyle
+                    }
+                    else -> {
+                        // Table row elements with alternating colors
+                        cell.cellStyle = if (tableDataRowIndex % 2 == 1) alternateStyle else dataStyle
+                    }
                 }
+            }
+
+            // Only increment alternating zebra count on actual table rows
+            if (!isHeader && !isMetadata && !isDivider && !isBlank) {
+                tableDataRowIndex++
             }
         }
 
-        // 3. AUTO WIDTH MANAGEMENT EXCEPT THE FIRST COLUMN
-        // "وضبط الأعمدة تلقائي ما عدا العمود الاول"
+        // Adjust column widths gracefully (except 1st column)
         for (i in 0 until maxCols) {
             if (i == 0) {
-                // Column 0 is the EXCEPTED (first) column. We give it a nice fixed default width so it looks pleasant but is not auto-fitted.
-                sheet.setColumnWidth(0, 14 * 256) // ~14 characters wide
+                sheet.setColumnWidth(0, 16 * 256) // Perfect default padding
             } else {
                 try {
                     sheet.autoSizeColumn(i)
                 } catch (e: Exception) {
-                    // Fallback to safe width if autosizing fails on certain characters
                     sheet.setColumnWidth(i, 18 * 256)
                 }
             }
         }
 
-        // Write output
+        // Write to stream
         val outputStream = ByteArrayOutputStream()
         workbook.use { wb ->
             wb.write(outputStream)
