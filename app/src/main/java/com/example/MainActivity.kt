@@ -133,7 +133,7 @@ fun ConverterDashboard() {
                     estimatedOutputTitle = ReportConverter.extractReportTitle(text, name)
                     
                     currentAppState = AppState.FILE_LOADED
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     errorMessage = e.message ?: "حدث خطأ غير متوقع أثناء تحميل الملف."
                     currentAppState = AppState.ERROR
                 }
@@ -142,8 +142,30 @@ fun ConverterDashboard() {
     }
 
     // File Save Launcher (Create XLSX file)
-    val saveFileLauncher = rememberLauncherForActivityResult(
+    val saveXlsxLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    generatedExcelBytes?.let { bytes ->
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.openOutputStream(uri)?.use { out ->
+                                out.write(bytes)
+                            }
+                        }
+                        Toast.makeText(context, "تم حفظ الملف بنجاح! 💾", Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "فشل حفظ الملف: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    // File Save Launcher (Create XLS file)
+    val saveXlsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/vnd.ms-excel")
     ) { uri: Uri? ->
         if (uri != null) {
             coroutineScope.launch {
@@ -223,7 +245,7 @@ fun ConverterDashboard() {
                                     generatedExcelBytes = excelBytes
                                     currentAppState = AppState.SUCCESS
                                     
-                                } catch (e: Exception) {
+                                } catch (e: Throwable) {
                                     errorMessage = e.message ?: "حدث خطأ غير متوقع أثناء المعالجة."
                                     currentAppState = AppState.ERROR
                                 }
@@ -245,12 +267,21 @@ fun ConverterDashboard() {
             }
             AppState.SUCCESS -> {
                 item {
+                    val isXlsx = generatedExcelBytes != null && generatedExcelBytes!!.size >= 4 &&
+                            generatedExcelBytes!![0] == 0x50.toByte() && generatedExcelBytes!![1] == 0x4B.toByte() &&
+                            generatedExcelBytes!![2] == 0x03.toByte() && generatedExcelBytes!![3] == 0x04.toByte()
+                    val suffix = if (isXlsx) ".xlsx" else ".xls"
+
                     SuccessActionCard(
-                        outputName = estimatedOutputTitle,
+                        outputName = "$estimatedOutputTitle$suffix",
                         rows = parsedRowsCount,
                         cols = parsedColsCount,
                         onSaveFile = {
-                            saveFileLauncher.launch("$estimatedOutputTitle.xlsx")
+                            if (isXlsx) {
+                                saveXlsxLauncher.launch("$estimatedOutputTitle.xlsx")
+                            } else {
+                                saveXlsLauncher.launch("$estimatedOutputTitle.xls")
+                            }
                         },
                         onShareFile = {
                             val bytes = generatedExcelBytes
@@ -892,7 +923,7 @@ fun SuccessActionCard(
                         modifier = Modifier.size(24.dp)
                     )
                     Text(
-                        text = "$outputName.xlsx",
+                        text = outputName,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -1156,7 +1187,11 @@ fun getFileNameFromUri(context: Context, uri: Uri): String {
  */
 fun shareExcelFile(context: Context, bytes: ByteArray, title: String) {
     try {
-        val cacheFile = File(context.cacheDir, "$title.xlsx")
+        val isXlsx = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte() && bytes[2] == 0x03.toByte() && bytes[3] == 0x04.toByte()
+        val suffix = if (isXlsx) ".xlsx" else ".xls"
+        val mime = if (isXlsx) "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" else "application/vnd.ms-excel"
+
+        val cacheFile = File(context.cacheDir, "$title$suffix")
         FileOutputStream(cacheFile).use { out ->
             out.write(bytes)
         }
@@ -1168,7 +1203,7 @@ fun shareExcelFile(context: Context, bytes: ByteArray, title: String) {
         )
         
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            type = mime
             putExtra(Intent.EXTRA_STREAM, contentUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }

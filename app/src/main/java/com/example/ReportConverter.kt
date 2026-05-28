@@ -1,13 +1,8 @@
 package com.example
 
-import org.apache.poi.ss.usermodel.FillPatternType
-import org.apache.poi.ss.usermodel.HorizontalAlignment
-import org.apache.poi.ss.usermodel.IndexedColors
-import org.apache.poi.ss.usermodel.VerticalAlignment
+import org.apache.poi.ss.usermodel.*
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
-import org.apache.poi.xssf.usermodel.XSSFCellStyle
-import org.apache.poi.xssf.usermodel.XSSFFont
-import org.apache.poi.xssf.usermodel.XSSFColor
+import org.apache.poi.hssf.usermodel.HSSFWorkbook
 import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
 import java.text.SimpleDateFormat
@@ -277,40 +272,49 @@ object ReportConverter {
      * Preserves the basic structure and layout of the report perfectly, removing all color filling.
      */
     fun generateExcel(data: List<List<String>>): ByteArray {
-        val workbook = XSSFWorkbook()
+        val workbook: Workbook = try {
+            XSSFWorkbook()
+        } catch (t: Throwable) {
+            // Safe fallback to lightweight binary-based HSSFWorkbook on devices missing XML libraries
+            HSSFWorkbook()
+        }
         val sheet = workbook.createSheet("تقرير_مستخرج")
 
-        sheet.setRightToLeft(true)
+        try {
+            sheet.setRightToLeft(true)
+        } catch (e: Exception) {
+            // Ignore if right to left property setting is not supported by the workbook sheet
+        }
 
         // Fonts
-        val headerFont = (workbook.createFont() as XSSFFont).apply {
+        val headerFont = workbook.createFont().apply {
             bold = true
             fontHeightInPoints = 11
             color = IndexedColors.BLACK.index
         }
 
-        val dataBoldFont = (workbook.createFont() as XSSFFont).apply {
+        val dataBoldFont = workbook.createFont().apply {
             bold = true
             fontHeightInPoints = 10
             color = IndexedColors.BLACK.index
         }
 
-        val titleFont = (workbook.createFont() as XSSFFont).apply {
+        val titleFont = workbook.createFont().apply {
             bold = true
             fontHeightInPoints = 12
             color = IndexedColors.BLACK.index
         }
 
-        val faintFont = (workbook.createFont() as XSSFFont).apply {
+        val faintFont = workbook.createFont().apply {
             bold = false
             fontHeightInPoints = 9
             color = IndexedColors.GREY_50_PERCENT.index
         }
 
-        val thinBorder = org.apache.poi.ss.usermodel.BorderStyle.THIN
+        val thinBorder = BorderStyle.THIN
 
         // Styles
-        val headerStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
+        val headerStyle = workbook.createCellStyle().apply {
             setFont(headerFont)
             alignment = HorizontalAlignment.CENTER
             verticalAlignment = VerticalAlignment.CENTER
@@ -320,7 +324,7 @@ object ReportConverter {
             borderRight = thinBorder
         }
 
-        val dataStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
+        val dataStyle = workbook.createCellStyle().apply {
             setFont(dataBoldFont)
             alignment = HorizontalAlignment.GENERAL
             verticalAlignment = VerticalAlignment.CENTER
@@ -330,13 +334,13 @@ object ReportConverter {
             borderRight = thinBorder
         }
 
-        val metadataStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
+        val metadataStyle = workbook.createCellStyle().apply {
             setFont(titleFont)
             alignment = HorizontalAlignment.RIGHT
             verticalAlignment = VerticalAlignment.CENTER
         }
 
-        val dividerStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
+        val dividerStyle = workbook.createCellStyle().apply {
             setFont(faintFont)
             alignment = HorizontalAlignment.CENTER
             verticalAlignment = VerticalAlignment.CENTER
