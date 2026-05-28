@@ -311,27 +311,17 @@ object ReportConverter {
             color = IndexedColors.GREY_50_PERCENT.index
         }
 
-        val thinBorder = BorderStyle.THIN
-
         // Styles
         val headerStyle = workbook.createCellStyle().apply {
             setFont(headerFont)
             alignment = HorizontalAlignment.CENTER
             verticalAlignment = VerticalAlignment.CENTER
-            borderTop = thinBorder
-            borderBottom = thinBorder
-            borderLeft = thinBorder
-            borderRight = thinBorder
         }
 
         val dataStyle = workbook.createCellStyle().apply {
             setFont(dataBoldFont)
             alignment = HorizontalAlignment.GENERAL
             verticalAlignment = VerticalAlignment.CENTER
-            borderTop = thinBorder
-            borderBottom = thinBorder
-            borderLeft = thinBorder
-            borderRight = thinBorder
         }
 
         val metadataStyle = workbook.createCellStyle().apply {
@@ -396,7 +386,11 @@ object ReportConverter {
 
         // Adjust column widths gracefully (using manual estimation to avoid AWT / SheetUtil crashes on Android)
         for (i in 0 until maxCols) {
-            var maxCharLength = 12
+            if (i == 0) {
+                sheet.setColumnWidth(0, 16 * 256) // First column default width
+                continue
+            }
+            var maxCharLength = 0
             for (rowIdx in 0..sheet.lastRowNum) {
                 val r = sheet.getRow(rowIdx) ?: continue
                 val c = r.getCell(i) ?: continue
@@ -409,9 +403,8 @@ object ReportConverter {
                     maxCharLength = text.length
                 }
             }
-            // Limit to reasonable width bounds (e.g. min 12 chars, max 45 chars) + standard padding
-            val charCount = minOf(maxOf(maxCharLength, 12), 45)
-            sheet.setColumnWidth(i, (charCount + 4) * 256)
+            val charCount = if (maxCharLength > 0) maxCharLength else 10
+            sheet.setColumnWidth(i, charCount * 256)
         }
 
         // Write to stream
