@@ -394,17 +394,24 @@ object ReportConverter {
             }
         }
 
-        // Adjust column widths gracefully (except 1st column)
+        // Adjust column widths gracefully (using manual estimation to avoid AWT / SheetUtil crashes on Android)
         for (i in 0 until maxCols) {
-            if (i == 0) {
-                sheet.setColumnWidth(0, 16 * 256) // Perfect default padding
-            } else {
-                try {
-                    sheet.autoSizeColumn(i)
+            var maxCharLength = 12
+            for (rowIdx in 0..sheet.lastRowNum) {
+                val r = sheet.getRow(rowIdx) ?: continue
+                val c = r.getCell(i) ?: continue
+                val text = try {
+                    c.stringCellValue ?: ""
                 } catch (e: Exception) {
-                    sheet.setColumnWidth(i, 18 * 256)
+                    ""
+                }
+                if (text.length > maxCharLength) {
+                    maxCharLength = text.length
                 }
             }
+            // Limit to reasonable width bounds (e.g. min 12 chars, max 45 chars) + standard padding
+            val charCount = minOf(maxOf(maxCharLength, 12), 45)
+            sheet.setColumnWidth(i, (charCount + 4) * 256)
         }
 
         // Write to stream
