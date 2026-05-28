@@ -273,8 +273,8 @@ object ReportConverter {
     }
 
     /**
-     * Generates a beautifully-designed, bold Excel workbook byte array.
-     * Preserves the basic structure and layout of the report perfectly, styled matching "Editorial Aesthetic".
+     * Generates a beautifully-designed, black-and-white clean Excel workbook byte array.
+     * Preserves the basic structure and layout of the report perfectly, removing all color filling.
      */
     fun generateExcel(data: List<List<String>>): ByteArray {
         val workbook = XSSFWorkbook()
@@ -282,62 +282,52 @@ object ReportConverter {
 
         sheet.setRightToLeft(true)
 
-        // DEFINING PALETTE COLORS (Editorial Aesthetic)
-        // Primary Purplebrand: XSSFColor with RGB #6750A4
-        val primaryPurple = XSSFColor(java.awt.Color(103, 80, 164), null)
-        // Deep Warm Violet for Text: RGB #21005D
-        val deepWarmViolet = XSSFColor(java.awt.Color(33, 0, 93), null)
-        // Alternating Soft Violet background: RGB #F3EDF7
-        val softVioletStrip = XSSFColor(java.awt.Color(243, 237, 247), null)
-        // Divider light gray: RGB #EADDFF
-        val lightDividerColor = XSSFColor(java.awt.Color(234, 221, 255), null)
-
         // Fonts
         val headerFont = (workbook.createFont() as XSSFFont).apply {
             bold = true
             fontHeightInPoints = 11
-            setColor(XSSFColor(java.awt.Color.WHITE, null))
+            color = IndexedColors.BLACK.index
         }
 
         val dataBoldFont = (workbook.createFont() as XSSFFont).apply {
             bold = true
             fontHeightInPoints = 10
-            setColor(deepWarmViolet)
+            color = IndexedColors.BLACK.index
         }
 
         val titleFont = (workbook.createFont() as XSSFFont).apply {
             bold = true
             fontHeightInPoints = 12
-            setColor(primaryPurple)
+            color = IndexedColors.BLACK.index
         }
 
         val faintFont = (workbook.createFont() as XSSFFont).apply {
             bold = false
             fontHeightInPoints = 9
-            setColor(XSSFColor(java.awt.Color(100, 100, 110), null))
+            color = IndexedColors.GREY_50_PERCENT.index
         }
+
+        val thinBorder = org.apache.poi.ss.usermodel.BorderStyle.THIN
 
         // Styles
         val headerStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
             setFont(headerFont)
-            setFillForegroundColor(primaryPurple)
-            fillPattern = FillPatternType.SOLID_FOREGROUND
             alignment = HorizontalAlignment.CENTER
             verticalAlignment = VerticalAlignment.CENTER
+            borderTop = thinBorder
+            borderBottom = thinBorder
+            borderLeft = thinBorder
+            borderRight = thinBorder
         }
 
         val dataStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
             setFont(dataBoldFont)
             alignment = HorizontalAlignment.GENERAL
             verticalAlignment = VerticalAlignment.CENTER
-        }
-
-        val alternateStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
-            setFont(dataBoldFont)
-            setFillForegroundColor(softVioletStrip)
-            fillPattern = FillPatternType.SOLID_FOREGROUND
-            alignment = HorizontalAlignment.GENERAL
-            verticalAlignment = VerticalAlignment.CENTER
+            borderTop = thinBorder
+            borderBottom = thinBorder
+            borderLeft = thinBorder
+            borderRight = thinBorder
         }
 
         val metadataStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
@@ -348,14 +338,11 @@ object ReportConverter {
 
         val dividerStyle = (workbook.createCellStyle() as XSSFCellStyle).apply {
             setFont(faintFont)
-            setFillForegroundColor(lightDividerColor)
-            fillPattern = FillPatternType.SOLID_FOREGROUND
             alignment = HorizontalAlignment.CENTER
             verticalAlignment = VerticalAlignment.CENTER
         }
 
         var maxCols = 0
-        var tableDataRowIndex = 0
 
         for ((rIdx, rowData) in data.withIndex()) {
             val row = sheet.createRow(rIdx)
@@ -396,15 +383,10 @@ object ReportConverter {
                         cell.cellStyle = metadataStyle
                     }
                     else -> {
-                        // Table row elements with alternating colors
-                        cell.cellStyle = if (tableDataRowIndex % 2 == 1) alternateStyle else dataStyle
+                        // Table row elements with clean uncolored borders
+                        cell.cellStyle = dataStyle
                     }
                 }
-            }
-
-            // Only increment alternating zebra count on actual table rows
-            if (!isHeader && !isMetadata && !isDivider && !isBlank) {
-                tableDataRowIndex++
             }
         }
 
